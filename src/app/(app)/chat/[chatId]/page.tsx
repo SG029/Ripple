@@ -267,7 +267,7 @@ export default function ChatPage() {
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/lastMessageSenderId`] = AI_ASSISTANT_ID;
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/updatedAt`] = aiTime;
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/isAiChat`] = true;
-        aiUpdates[`/userChats/${currentUser.uid}/${chatId}/unreadMessages`] = 0; // AI message means current user saw it
+        aiUpdates[`/userChats/${currentUser.uid}/${chatId}/unreadMessages`] = 0; 
         
         await update(ref(db), aiUpdates);
       }
@@ -288,28 +288,28 @@ export default function ChatPage() {
 
   const handleDeleteSelectedMessages = async () => {
     if (!currentUser || selectedMessages.length === 0 || !chatMetadata) return;
-
+  
     const updates: Record<string, any> = {};
     selectedMessages.forEach(msgId => {
       updates[`/chatMessages/${chatId}/${msgId}`] = null; // Mark for deletion
     });
-
+  
     try {
       await update(ref(db), updates); // Perform deletions
-
+  
       // After successful deletion, update chat metadata if necessary
       const remainingMessagesQuery = dbQuery(ref(db, `chatMessages/${chatId}`), orderByChild('timestamp'), limitToLast(1));
       const remainingMessagesSnapshot = await get(remainingMessagesQuery);
       
       const metadataUpdates: Record<string, any> = {};
       const currentTime = serverTimestamp();
-
+  
       if (remainingMessagesSnapshot.exists()) {
         let newLastMessage: Message | null = null;
         remainingMessagesSnapshot.forEach(snap => { // Should only be one if messages exist
           newLastMessage = { id: snap.key!, ...snap.val() } as Message;
         });
-
+  
         if (newLastMessage) {
           metadataUpdates[`/chats/${chatId}/lastMessageText`] = newLastMessage.text;
           metadataUpdates[`/chats/${chatId}/lastMessageTimestamp`] = newLastMessage.timestamp;
@@ -329,7 +329,7 @@ export default function ChatPage() {
         metadataUpdates[`/chats/${chatId}/lastMessageText`] = "No messages yet.";
         metadataUpdates[`/chats/${chatId}/lastMessageTimestamp`] = currentTime;
         metadataUpdates[`/chats/${chatId}/lastMessageSenderId`] = null;
-
+  
         chatMetadata.participants.forEach(pId => {
            if (pId !== AI_ASSISTANT_ID) {
             metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageText`] = "No messages yet.";
@@ -341,7 +341,7 @@ export default function ChatPage() {
       }
       metadataUpdates[`/chats/${chatId}/updatedAt`] = currentTime;
       await update(ref(db), metadataUpdates);
-
+  
       toast({ title: "Messages Deleted", description: `${selectedMessages.length} message(s) deleted.` });
     } catch (error: any) {
       console.error("Error deleting messages or updating metadata:", error);
@@ -351,6 +351,7 @@ export default function ChatPage() {
       setShowDeleteConfirm(false);
     }
   };
+  
 
   const otherParticipantName = otherParticipant?.displayName || otherParticipant?.username || "User";
   const otherParticipantInitials = getInitials(otherParticipant?.displayName || otherParticipant?.username);
@@ -363,7 +364,6 @@ export default function ChatPage() {
   }
 
   if (!chatMetadata && !isLoading) {
-     // If still loading, the above return handles it. If not loading and no metadata, it's likely an error or redirect is pending.
     return <div className="container mx-auto py-8 text-center">Preparing chat...</div>;
   }
   
@@ -393,7 +393,6 @@ export default function ChatPage() {
               <div
                 key={msg.id}
                 className={`flex flex-col ${isCurrentUser ? "items-end" : "items-start"}`}
-                onClick={canSelect ? () => toggleMessageSelection(msg.id) : undefined}
               >
                 <div className={`flex items-end space-x-2 max-w-xs sm:max-w-md md:max-w-lg ${isCurrentUser ? "flex-row-reverse space-x-reverse" : ""}`}>
                    {!isCurrentUser && (
@@ -405,6 +404,7 @@ export default function ChatPage() {
                     </Avatar>
                   )}
                   <div
+                    onClick={canSelect ? () => toggleMessageSelection(msg.id) : undefined}
                     className={`p-3 rounded-xl ${
                       isCurrentUser
                         ? "bg-primary text-primary-foreground rounded-br-none"
