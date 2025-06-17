@@ -77,7 +77,6 @@ export default function UsersPage() {
       const chatSnapshot = await get(chatRef);
 
       if (!chatSnapshot.exists()) {
-        // Chat doesn't exist, create it
         const now = serverTimestamp();
         const newChatMetadata: ChatMetadata = {
           id: chatId,
@@ -108,7 +107,7 @@ export default function UsersPage() {
           otherParticipantUsername: otherUser.username,
           unreadMessages: 0,
           isAiChat: false,
-          updatedAt: Date.now(), // Use client timestamp for immediate sorting, server will update
+          updatedAt: now, // Use server timestamp
         };
 
         const otherUserChatEntry: UserChatEntry = {
@@ -117,9 +116,9 @@ export default function UsersPage() {
           otherParticipantDisplayName: currentUserData.displayName,
           otherParticipantPhotoURL: currentUserData.photoURL,
           otherParticipantUsername: currentUserData.username,
-          unreadMessages: 0,
+          unreadMessages: 0, // Initially 0, could be 1 if an initial message is sent
           isAiChat: false,
-          updatedAt: Date.now(),
+          updatedAt: now, // Use server timestamp
         };
         
         const updates: Record<string, any> = {};

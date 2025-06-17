@@ -21,17 +21,16 @@ import { ref, onValue, query, orderByChild } from "firebase/database";
 import { db } from "@/lib/firebase";
 import type { UserChatEntry } from "@/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 
-const AI_ASSISTANT_NAME = "AI Assistant"; // Define it here if not imported
+const AI_ASSISTANT_NAME = "AI Assistant";
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { currentUser, customUserData, signOut } = useAuth();
+  const { currentUser } = useAuth();
   const [userChats, setUserChats] = useState<UserChatEntry[]>([]);
   const [loadingChats, setLoadingChats] = useState(true);
-  const router = useRouter();
+  const router = useRouter(); // Not used, can be removed if not needed elsewhere
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(`${path}/`);
   
@@ -43,6 +42,7 @@ export function AppSidebar() {
   useEffect(() => {
     if (!currentUser?.uid) {
       setLoadingChats(false);
+      setUserChats([]); // Clear chats if user logs out
       return;
     }
 
@@ -68,6 +68,8 @@ export function AppSidebar() {
   }, [currentUser?.uid]);
 
   const aiChatId = currentUser ? `${currentUser.uid}_ai_assistant` : 'ai_assistant';
+
+  const { signOut } = useAuth(); // Moved signOut destructuring here
 
   return (
     <Sidebar collapsible="icon" variant="sidebar" side="left">
@@ -137,11 +139,12 @@ export function AppSidebar() {
             const displayName = chat.isAiChat 
                 ? AI_ASSISTANT_NAME 
                 : chat.otherParticipantDisplayName || chat.otherParticipantUsername || "User";
+            const isCurrentChat = pathname === `/chat/${chat.chatId}`;
             return (
             <SidebarMenuItem key={chat.chatId}>
               <SidebarMenuButton
                 asChild
-                isActive={pathname === `/chat/${chat.chatId}`}
+                isActive={isCurrentChat}
                 tooltip={displayName}
                 className="h-auto py-2 group-data-[collapsible=icon]:h-8"
               >
@@ -149,7 +152,7 @@ export function AppSidebar() {
                   <Avatar className="h-6 w-6 mr-2 group-data-[collapsible=icon]:h-5 group-data-[collapsible=icon]:w-5 group-data-[collapsible=icon]:mr-0">
                     <AvatarImage src={chat.otherParticipantPhotoURL || undefined} alt={displayName} data-ai-hint="user avatar" />
                     <AvatarFallback className="text-xs bg-sidebar-accent text-sidebar-accent-foreground">
-                      {chat.isAiChat ? <Bot size={14}/> : getInitials(chat.otherParticipantDisplayName || chat.otherParticipantUsername)}
+                      {chat.isAiChat ? <Bot size={14}/> : getInitials(displayName)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 overflow-hidden group-data-[collapsible=icon]:hidden">
@@ -160,8 +163,8 @@ export function AppSidebar() {
                       </span>
                     )}
                   </div>
-                   {chat.unreadMessages > 0 && (
-                     <Badge variant="default" className="ml-auto text-xs h-5 px-1.5 group-data-[collapsible=icon]:hidden">
+                   {chat.unreadMessages > 0 && !isCurrentChat && (
+                     <Badge variant="default" className="ml-auto text-xs h-5 px-1.5 group-data-[collapsible=icon]:hidden bg-primary text-primary-foreground">
                         {chat.unreadMessages}
                      </Badge>
                    )}

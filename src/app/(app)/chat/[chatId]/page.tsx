@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Send, ArrowLeft, Bot, User as UserIcon } from "lucide-react";
+import { Send, ArrowLeft, Bot } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { aiChatBot } from "@/ai/flows/ai-chat-bot"; 
 import Link from "next/link";
@@ -69,7 +69,7 @@ export default function ChatPage() {
           if (otherUserId && metadata.participantDetails[otherUserId]) {
              setOtherParticipant({
                 id: otherUserId,
-                displayName: metadata.participantDetails[otherUserId].displayName,
+                displayName: metadata.participantDetails[otherUserId].displayName || metadata.participantDetails[otherUserId].username || "User",
                 photoURL: metadata.participantDetails[otherUserId].photoURL,
                 username: metadata.participantDetails[otherUserId].username,
              });
@@ -79,15 +79,18 @@ export default function ChatPage() {
               const otherUserData = userSnap.val() as CustomUser;
                setOtherParticipant({
                 id: otherUserData.uid,
-                displayName: otherUserData.displayName,
+                displayName: otherUserData.displayName || otherUserData.username || "User",
                 photoURL: otherUserData.photoURL,
                 username: otherUserData.username
               });
             }
           }
         }
-        const userChatRef = ref(db, `userChats/${currentUser.uid}/${chatId}/unreadMessages`);
-        set(userChatRef, 0);
+        // Mark messages as read for the current user
+        if (currentUser?.uid && chatId) {
+            const userChatRef = ref(db, `userChats/${currentUser.uid}/${chatId}/unreadMessages`);
+            set(userChatRef, 0);
+        }
 
       } else {
         if (chatId === `${currentUser.uid}_${AI_ASSISTANT_ID}`) {
@@ -102,7 +105,7 @@ export default function ChatPage() {
                 updatedAt: now,
                 participantDetails: {
                     [currentUser.uid]: {
-                        displayName: customUserData?.displayName || currentUser.displayName,
+                        displayName: customUserData?.displayName || currentUser.displayName || (customUserData?.username ? `@${customUserData.username}`: `User ${currentUser.uid.substring(0,6)}`),
                         photoURL: customUserData?.photoURL || currentUser.photoURL,
                         username: customUserData?.username,
                     },
@@ -122,9 +125,9 @@ export default function ChatPage() {
                 otherParticipantPhotoURL: aiPhoto,
                 unreadMessages: 0,
                 isAiChat: true,
-                updatedAt: Date.now(),
+                updatedAt: now,
                 lastMessageText: "Say hello to your AI Assistant!",
-                lastMessageTimestamp: Date.now(),
+                lastMessageTimestamp: now, 
                 lastMessageSenderId: AI_ASSISTANT_ID
             };
             const updates: Record<string, any> = {};
@@ -156,7 +159,7 @@ export default function ChatPage() {
 
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentUser || !chatMetadata) return;
+    if (!newMessage.trim() || !currentUser || !customUserData || !chatMetadata) return;
 
     setIsSending(true);
     const messageText = newMessage;
@@ -184,14 +187,28 @@ export default function ChatPage() {
       updates[`/chats/${chatId}/lastMessageSenderId`] = currentUser.uid;
       updates[`/chats/${chatId}/updatedAt`] = serverTimestamp();
       
-      chatMetadata.participants.forEach(pId => {
+      for (const pId of chatMetadata.participants) {
         if (pId !== AI_ASSISTANT_ID) { 
             updates[`/userChats/${pId}/${chatId}/lastMessageText`] = messageText;
             updates[`/userChats/${pId}/${chatId}/lastMessageTimestamp`] = serverTimestamp();
             updates[`/userChats/${pId}/${chatId}/lastMessageSenderId`] = currentUser.uid;
             updates[`/userChats/${pId}/${chatId}/updatedAt`] = serverTimestamp();
+            updates[`/userChats/${pId}/${chatId}/isAiChat`] = chatMetadata.isAiChat; // ensure this is set
+
+            if (pId === currentUser.uid) {
+                updates[`/userChats/${pId}/${chatId}/unreadMessages`] = 0; // Sender's unread count is 0
+            } else {
+                // Increment unread count for other human participants
+                const otherUserChatEntryRef = child(ref(db, 'userChats'), `${pId}/${chatId}`);
+                const snapshot = await get(otherUserChatEntryRef);
+                let currentUnread = 0;
+                if (snapshot.exists() && snapshot.val().unreadMessages) {
+                    currentUnread = snapshot.val().unreadMessages;
+                }
+                updates[`/userChats/${pId}/${chatId}/unreadMessages`] = currentUnread + 1;
+            }
         }
-      });
+      }
       
       await update(ref(db), updates);
 
@@ -217,10 +234,12 @@ export default function ChatPage() {
         aiUpdates[`/chats/${chatId}/lastMessageSenderId`] = AI_ASSISTANT_ID;
         aiUpdates[`/chats/${chatId}/updatedAt`] = serverTimestamp();
         
+        // Update userChat entry for the current user regarding AI's message
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/lastMessageText`] = aiResponse.response;
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/lastMessageTimestamp`] = serverTimestamp();
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/lastMessageSenderId`] = AI_ASSISTANT_ID;
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/updatedAt`] = serverTimestamp();
+        aiUpdates[`/userChats/${currentUser.uid}/${chatId}/unreadMessages`] = 0; // User is viewing, so no unread
         
         await update(ref(db), aiUpdates);
       }
@@ -265,7 +284,7 @@ export default function ChatPage() {
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <Avatar className="h-10 w-10 border-2 border-primary/50">
-                <AvatarImage src={participantPhotoForHeader || undefined} alt={participantNameForHeader} data-ai-hint="user avatar chat" />
+                <AvatarImage src={participantPhotoForHeader || undefined} alt={participantNameForHeader || "avatar"} data-ai-hint="user avatar chat" />
                 <AvatarFallback className="bg-primary text-primary-foreground">
                 {chatMetadata?.isAiChat ? <Bot size={20}/> : getInitials(otherParticipant?.displayName || otherParticipant?.username)}
                 </AvatarFallback>
@@ -320,7 +339,7 @@ export default function ChatPage() {
               )}
             </div>
           ))}
-          {isSending && chatMetadata?.isAiChat && (
+          {isSending && chatMetadata?.isAiChat && messages.at(-1)?.senderId === currentUser?.uid && (
              <div className="flex items-end space-x-2 justify-start">
                <Avatar className="h-8 w-8">
                   <AvatarImage src={chatMetadata?.participantDetails[AI_ASSISTANT_ID]?.photoURL || AI_ASSISTANT_PHOTO_URL_FALLBACK} alt="AI Assistant" data-ai-hint="ai avatar" />
