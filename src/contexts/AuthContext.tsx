@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { User as FirebaseUser } from "firebase/auth";
@@ -31,14 +32,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Fetch custom user data from Realtime Database
         const userRef = ref(db, `users/${user.uid}`);
         const snapshot = await get(userRef);
         if (snapshot.exists()) {
           setCustomUserData(snapshot.val() as CustomUser);
         } else {
-          // User exists in Auth but not in DB (e.g., first Google Sign-In)
-          // Or if user signed up but didn't complete profile
           setCustomUserData(null); 
         }
       } else {
@@ -60,27 +58,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const userRef = ref(db, `users/${uid}`);
     const usernameRef = ref(db, `usernames/${username}`);
     
+    const currentAuthUserDisplayName = auth.currentUser?.displayName?.trim();
+    // Use existing customUserData's username for fallback if available, otherwise the new username being set.
+    const usernameForDisplayFallback = customUserData?.username || username;
+
+    const effectiveDisplayName = 
+      displayName?.trim() || 
+      currentAuthUserDisplayName || 
+      (usernameForDisplayFallback ? `@${usernameForDisplayFallback}` : `User ${uid.substring(0, 6)}`);
+
     const newUserData: CustomUser = {
       uid,
       email: currentUser?.email || null,
-      displayName: displayName || currentUser?.displayName || "Anonymous",
-      photoURL: photoURL || currentUser?.photoURL || `https://placehold.co/100x100.png?text=${displayName?.[0]?.toUpperCase() || 'A'}`,
+      displayName: effectiveDisplayName,
+      photoURL: photoURL?.trim() || currentUser?.photoURL || `https://placehold.co/100x100.png?text=${effectiveDisplayName[0]?.toUpperCase() || 'X'}`,
       username,
     };
 
     try {
-      // Check username availability again in a transaction-like manner (simplified here)
       const usernameSnapshot = await get(usernameRef);
-      if (usernameSnapshot.exists() && usernameSnapshot.val() !== uid) {
+      if (usernameSnapshot.exists() && usernameSnapshot.val() !== uid && username !== customUserData?.username) {
         throw new Error("Username is already taken.");
       }
 
       const updates: Record<string, any> = {};
       updates[`/users/${uid}`] = newUserData;
-      updates[`/usernames/${username}`] = uid;
+      
+      // If username changed from existing customUserData, remove old username entry
+      if (customUserData?.username && customUserData.username !== username) {
+        updates[`/usernames/${customUserData.username}`] = null; 
+      }
+      updates[`/usernames/${username}`] = uid; // Set new username entry
       
       await update(ref(db), updates);
-      setCustomUserData(newUserData);
+      setCustomUserData(newUserData); // Update local state
+      if (auth.currentUser && auth.currentUser.displayName !== newUserData.displayName) {
+         // await updateFirebaseProfile(auth.currentUser, { displayName: newUserData.displayName }); // Update Firebase Auth profile too
+      }
       toast({ title: "Profile updated successfully!"});
     } catch (error: any) {
       console.error("Error updating user profile:", error);
@@ -100,36 +114,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const snapshot = await get(userRef);
         if (!snapshot.exists()) {
           // New user via Google, create DB entry
-          const newUsername = user.email?.split('@')[0] || `user${Date.now().toString().slice(-5)}`;
-          // Check if this auto-generated username is available
-          let finalUsername = newUsername;
+          const googleDisplayName = user.displayName?.trim();
+          const baseUsername = user.email?.split('@')[0]?.replace(/[^a-zA-Z0-9_]/g, '') || `user${Date.now().toString().slice(-5)}`;
+          
+          let finalUsername = baseUsername;
           let usernameIsAvailable = await isUsernameAvailable(finalUsername);
           let attempts = 0;
           while(!usernameIsAvailable && attempts < 5) {
-            finalUsername = `${newUsername}${Math.floor(Math.random()*100)}`;
+            finalUsername = `${baseUsername}${Math.floor(Math.random()*1000)}`;
             usernameIsAvailable = await isUsernameAvailable(finalUsername);
             attempts++;
           }
-          if (!usernameIsAvailable) { // fallback if still not available
-             finalUsername = `user${user.uid.slice(0,8)}`;
+          if (!usernameIsAvailable) { 
+             finalUsername = `user_${user.uid.slice(0,8)}`;
           }
 
+          const effectiveDisplayName = googleDisplayName || `@${finalUsername}` || `User ${user.uid.substring(0,6)}`;
 
           const newUserProfile: CustomUser = {
             uid: user.uid,
             email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL || `https://placehold.co/100x100.png?text=${user.displayName?.[0]?.toUpperCase() || 'U'}`,
+            displayName: effectiveDisplayName,
+            photoURL: user.photoURL || `https://placehold.co/100x100.png?text=${effectiveDisplayName[0]?.toUpperCase() || 'X'}`,
             username: finalUsername,
           };
           await set(userRef, newUserProfile);
           await set(ref(db, `usernames/${finalUsername}`), user.uid);
           setCustomUserData(newUserProfile);
-          toast({ title: "Signed in with Google", description: `Welcome, ${user.displayName}!` });
+          toast({ title: "Signed in with Google", description: `Welcome, ${effectiveDisplayName}!` });
           router.push("/dashboard");
         } else {
-           setCustomUserData(snapshot.val() as CustomUser);
-           toast({ title: "Signed in with Google", description: `Welcome back, ${snapshot.val().displayName}!` });
+           const existingCustomUserData = snapshot.val() as CustomUser;
+           setCustomUserData(existingCustomUserData);
+           toast({ title: "Signed in with Google", description: `Welcome back, ${existingCustomUserData.displayName || 'User'}!` });
            router.push("/dashboard");
         }
       }
@@ -149,7 +166,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setCustomUserData(null);
       toast({ title: "Signed Out", description: "You have been successfully signed out." });
       router.push("/login");
-    } catch (error: any) {
+    } catch (error: any)      {
       console.error("Sign Out Error:", error);
       toast({ title: "Sign Out Failed", description: error.message, variant: "destructive" });
     } finally {
