@@ -10,19 +10,21 @@ import {
   SidebarMenuButton,
   SidebarSeparator,
   SidebarHeader,
-  SidebarMenuSkeleton, // Added import
+  SidebarMenuSkeleton, 
 } from "@/components/ui/sidebar";
 import { Bot, MessageSquare, Users, Settings, LogOut } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useState } from "react";
-import { ref, onValue, query, orderByChild, limitToLast } from "firebase/database";
+import { ref, onValue, query, orderByChild } from "firebase/database";
 import { db } from "@/lib/firebase";
 import type { UserChatEntry } from "@/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+
+const AI_ASSISTANT_NAME = "AI Assistant"; // Define it here if not imported
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -47,15 +49,15 @@ export function AppSidebar() {
     setLoadingChats(true);
     const userChatsRef = query(
         ref(db, `userChats/${currentUser.uid}`),
-        orderByChild('updatedAt') // Sort by most recently updated
+        orderByChild('updatedAt') 
     );
 
     const unsubscribe = onValue(userChatsRef, (snapshot) => {
       const chatsData: UserChatEntry[] = [];
       snapshot.forEach((childSnapshot) => {
-        chatsData.push({ chatId: childSnapshot.key, ...childSnapshot.val() } as UserChatEntry);
+        chatsData.push({ chatId: childSnapshot.key!, ...childSnapshot.val() } as UserChatEntry);
       });
-      setUserChats(chatsData.reverse()); // Show most recent first
+      setUserChats(chatsData.reverse()); 
       setLoadingChats(false);
     }, (error) => {
       console.error("Error fetching user chats:", error);
@@ -70,7 +72,6 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" variant="sidebar" side="left">
       <SidebarHeader>
-         {/* Logo/App Name could go here, but navbar handles it */}
       </SidebarHeader>
       <SidebarContent className="flex flex-col">
         <SidebarMenu className="flex-grow">
@@ -91,11 +92,11 @@ export function AppSidebar() {
             <SidebarMenuButton 
               asChild 
               isActive={isActive(`/chat/${aiChatId}`)}
-              tooltip="AI Assistant"
+              tooltip={AI_ASSISTANT_NAME}
             >
               <Link href={`/chat/${aiChatId}`}>
                 <Bot />
-                <span>AI Assistant</span>
+                <span>{AI_ASSISTANT_NAME}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -132,23 +133,27 @@ export function AppSidebar() {
               No recent chats.
             </div>
           )}
-          {!loadingChats && userChats.map((chat) => (
+          {!loadingChats && userChats.map((chat) => {
+            const displayName = chat.isAiChat 
+                ? AI_ASSISTANT_NAME 
+                : chat.otherParticipantDisplayName || chat.otherParticipantUsername || "User";
+            return (
             <SidebarMenuItem key={chat.chatId}>
               <SidebarMenuButton
                 asChild
                 isActive={pathname === `/chat/${chat.chatId}`}
-                tooltip={chat.otherParticipantDisplayName || "Chat"}
+                tooltip={displayName}
                 className="h-auto py-2 group-data-[collapsible=icon]:h-8"
               >
                 <Link href={`/chat/${chat.chatId}`} className="flex items-center w-full">
                   <Avatar className="h-6 w-6 mr-2 group-data-[collapsible=icon]:h-5 group-data-[collapsible=icon]:w-5 group-data-[collapsible=icon]:mr-0">
-                    <AvatarImage src={chat.otherParticipantPhotoURL || undefined} alt={chat.otherParticipantDisplayName || ""} data-ai-hint="user avatar" />
+                    <AvatarImage src={chat.otherParticipantPhotoURL || undefined} alt={displayName} data-ai-hint="user avatar" />
                     <AvatarFallback className="text-xs bg-sidebar-accent text-sidebar-accent-foreground">
-                      {chat.isAiChat ? <Bot size={14}/> : getInitials(chat.otherParticipantDisplayName)}
+                      {chat.isAiChat ? <Bot size={14}/> : getInitials(chat.otherParticipantDisplayName || chat.otherParticipantUsername)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 overflow-hidden group-data-[collapsible=icon]:hidden">
-                    <span className="text-sm font-medium truncate block">{chat.otherParticipantDisplayName || "Chat"}</span>
+                    <span className="text-sm font-medium truncate block">{displayName}</span>
                     {chat.lastMessageText && (
                       <span className="text-xs text-sidebar-foreground/70 truncate block">
                         {chat.lastMessageSenderId === currentUser?.uid ? "You: " : ""}{chat.lastMessageText}
@@ -163,7 +168,7 @@ export function AppSidebar() {
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
-          ))}
+          )})}
         </SidebarMenu>
       </SidebarContent>
       <SidebarFooter>
