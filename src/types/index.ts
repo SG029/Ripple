@@ -1,3 +1,4 @@
+
 import type { User as FirebaseUser } from "firebase/auth";
 
 export interface CustomUser {
@@ -10,42 +11,47 @@ export interface CustomUser {
 
 export interface Message {
   id: string;
-  senderId: string; // UID of sender or "ai"
-  receiverId: string; // UID of receiver or "ai"
-  content: string;
-  timestamp: number; // Firebase ServerValue.TIMESTAMP or a number
-  contentType?: 'text' | 'image'; // Optional: for future enhancements
+  chatId: string;
+  senderId: string; // UID of sender or "ai_assistant"
+  text: string;
+  timestamp: number | object; // Firebase ServerValue.TIMESTAMP or a number
+  contentType?: 'text' | 'image'; 
+  senderDisplayName?: string; // Denormalized for easier display
+  senderPhotoURL?: string; // Denormalized
 }
 
 export interface ChatMetadata {
-  id: string;
-  participants: string[]; // [uid1, uid2] or [uid, "ai"]
-  lastMessage?: Message;
-  lastMessageTimestamp?: number;
-  unreadCount?: { [userId: string]: number };
+  id: string; // Composite ID: uid1_uid2 (sorted) or uid_ai_assistant
+  participants: string[]; // [uid1, uid2] or [uid, "ai_assistant"]
+  participantUids: string[]; // Actual UIDs, excluding "ai_assistant" if present
   isAiChat: boolean;
-  participantDetails?: {
-    [userId: string]: { // or "ai"
+  lastMessageText?: string;
+  lastMessageTimestamp?: number | object;
+  lastMessageSenderId?: string;
+  unreadCount?: { [userId: string]: number };
+  participantDetails: {
+    [userId: string]: { // key can be UID or "ai_assistant"
       displayName: string | null;
       photoURL: string | null;
       username?: string | null;
     }
-  }
+  };
+  createdAt: number | object;
+  updatedAt: number | object;
 }
 
-export interface ChatThread {
-  metadata: ChatMetadata;
-  messages: Message[];
-}
-
-// For userChats structure in RTDB
-export interface UserChatInfo {
-  otherParticipantId: string; // UID of the other user or "ai"
-  lastMessage: string;
-  lastMessageSnippet?: string; // Shortened version of lastMessage
-  lastMessageTimestamp: number;
+// For /userChats/{uid}/{chatId} path in RTDB
+// Stores info about a user's specific chat for quick sidebar loading
+export interface UserChatEntry {
+  chatId: string;
+  otherParticipantId: string; // UID of the other user or "ai_assistant"
+  otherParticipantDisplayName: string | null;
+  otherParticipantPhotoURL: string | null;
+  otherParticipantUsername?: string | null;
+  lastMessageText?: string;
+  lastMessageTimestamp?: number; // Resolved timestamp
+  lastMessageSenderId?: string;
+  unreadMessages: number;
   isAiChat: boolean;
-  displayName: string | null; // Display name of the other participant
-  photoURL: string | null; // Photo URL of the other participant
-  unreadMessages?: number; // Count of unread messages for the current user
+  updatedAt: number; // Resolved timestamp for sorting
 }
