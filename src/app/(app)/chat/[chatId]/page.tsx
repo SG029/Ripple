@@ -50,7 +50,11 @@ export default function ChatPage() {
 
   const getInitials = (name: string | null | undefined): string => {
     if (!name) return "?";
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0,2);
+    const nameParts = name.split(' ');
+    if (nameParts.length > 1 && nameParts[nameParts.length -1]) {
+      return `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase();
+    }
+    return name[0]?.toUpperCase() || "?";
   };
 
   useEffect(() => {
@@ -103,7 +107,6 @@ export default function ChatPage() {
                setOtherParticipant({ id: otherUserId, displayName: "User", photoURL: null, username: null });
             }
           } else {
-            // Handle case where otherUserId might be undefined (e.g., corrupted chat)
             setOtherParticipant(null);
           }
         }
@@ -113,9 +116,10 @@ export default function ChatPage() {
         }
 
       } else {
-        if (chatId === `${currentUser.uid}_${AI_ASSISTANT_ID}`) {
+        if (currentUser && chatId === `${currentUser.uid}_${AI_ASSISTANT_ID}`) {
             const now = serverTimestamp();
             const aiPhoto = AI_ASSISTANT_PHOTO_URL_FALLBACK;
+            const currentUserName = customUserData?.displayName || currentUser.displayName || (customUserData?.username ? `@${customUserData.username}`: `User ${currentUser.uid.substring(0,6)}`);
             const newAiChatMetadata: ChatMetadata = {
                 id: chatId,
                 participants: [currentUser.uid, AI_ASSISTANT_ID],
@@ -125,7 +129,7 @@ export default function ChatPage() {
                 updatedAt: now,
                 participantDetails: {
                     [currentUser.uid]: {
-                        displayName: customUserData?.displayName || currentUser.displayName || (customUserData?.username ? `@${customUserData.username}`: `User ${currentUser.uid.substring(0,6)}`),
+                        displayName: currentUserName,
                         photoURL: customUserData?.photoURL || currentUser.photoURL,
                         username: customUserData?.username,
                     },
@@ -154,6 +158,7 @@ export default function ChatPage() {
             updates[`/chats/${chatId}`] = newAiChatMetadata;
             updates[`/userChats/${currentUser.uid}/${chatId}`] = currentUserChatEntryForAi;
             await update(ref(db), updates);
+            // Note: No initial AI message is pushed here to chatMessages, user starts convo
         } else {
           toast({ title: "Chat not found", description: "This chat does not exist or you don't have access.", variant: "destructive" });
           router.push("/dashboard"); 
@@ -185,13 +190,15 @@ export default function ChatPage() {
     const messageText = newMessage;
     setNewMessage("");
 
+    const senderName = customUserData?.displayName || currentUser.displayName || (customUserData?.username ? `@${customUserData.username}`: "User");
+
     const messageData: Message = {
       id: '', 
       chatId,
       senderId: currentUser.uid,
       text: messageText,
       timestamp: serverTimestamp(),
-      senderDisplayName: customUserData?.displayName || currentUser.displayName || (customUserData?.username ? `@${customUserData.username}`: "User"),
+      senderDisplayName: senderName,
       senderPhotoURL: customUserData?.photoURL || currentUser.photoURL || undefined,
     };
 
@@ -259,30 +266,24 @@ export default function ChatPage() {
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/lastMessageTimestamp`] = aiTime;
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/lastMessageSenderId`] = AI_ASSISTANT_ID;
         aiUpdates[`/userChats/${currentUser.uid}/${chatId}/updatedAt`] = aiTime;
-        aiUpdates[`/userChats/${currentUser.uid}/${chatId}/unreadMessages`] = 0;
+        aiUpdates[`/userChats/${currentUser.uid}/${chatId}/isAiChat`] = true;
+        aiUpdates[`/userChats/${currentUser.uid}/${chatId}/unreadMessages`] = 0; // AI message means current user saw it
         
         await update(ref(db), aiUpdates);
       }
+
     } catch (error) {
       console.error("Error sending message:", error);
       toast({ title: "Send Error", description: "Could not send message.", variant: "destructive" });
-      setNewMessage(messageText); 
     } finally {
       setIsSending(false);
     }
   };
 
-  const handleMessageSelectToggle = (messageId: string, senderId: string) => {
-    if (senderId !== currentUser?.uid) return; // Only allow selecting own messages
-    setSelectedMessages((prevSelected) =>
-      prevSelected.includes(messageId)
-        ? prevSelected.filter((id) => id !== messageId)
-        : [...prevSelected, messageId]
+  const toggleMessageSelection = (messageId: string) => {
+    setSelectedMessages(prev => 
+      prev.includes(messageId) ? prev.filter(id => id !== messageId) : [...prev, messageId]
     );
-  };
-
-  const handleCancelSelection = () => {
-    setSelectedMessages([]);
   };
 
   const handleDeleteSelectedMessages = async () => {
@@ -294,187 +295,159 @@ export default function ChatPage() {
     });
 
     try {
-      await update(ref(db), updates);
-      
-      const remainingMessagesSnap = await get(dbQuery(ref(db, `chatMessages/${chatId}`), orderByChild('timestamp'), limitToLast(1)));
-      let newLastMessage: Message | null = null;
-      if (remainingMessagesSnap.exists()) {
-        remainingMessagesSnap.forEach(snap => newLastMessage = {id: snap.key!, ...snap.val()} as Message);
-      }
+      await update(ref(db), updates); // Perform deletions
 
-      const chatUpdates: Record<string, any> = {};
+      // After successful deletion, update chat metadata if necessary
+      const remainingMessagesQuery = dbQuery(ref(db, `chatMessages/${chatId}`), orderByChild('timestamp'), limitToLast(1));
+      const remainingMessagesSnapshot = await get(remainingMessagesQuery);
+      
+      const metadataUpdates: Record<string, any> = {};
       const currentTime = serverTimestamp();
 
-      if (newLastMessage) {
-        chatUpdates[`/chats/${chatId}/lastMessageText`] = newLastMessage.text;
-        chatUpdates[`/chats/${chatId}/lastMessageTimestamp`] = newLastMessage.timestamp;
-        chatUpdates[`/chats/${chatId}/lastMessageSenderId`] = newLastMessage.senderId;
-      } else {
-        chatUpdates[`/chats/${chatId}/lastMessageText`] = "No messages yet.";
-        chatUpdates[`/chats/${chatId}/lastMessageTimestamp`] = chatMetadata.createdAt; // or null
-        chatUpdates[`/chats/${chatId}/lastMessageSenderId`] = null;
-      }
-      chatUpdates[`/chats/${chatId}/updatedAt`] = currentTime;
+      if (remainingMessagesSnapshot.exists()) {
+        let newLastMessage: Message | null = null;
+        remainingMessagesSnapshot.forEach(snap => { // Should only be one if messages exist
+          newLastMessage = { id: snap.key!, ...snap.val() } as Message;
+        });
 
-      for (const pId of chatMetadata.participants) {
-        if (pId !== AI_ASSISTANT_ID) {
-            if (newLastMessage) {
-                chatUpdates[`/userChats/${pId}/${chatId}/lastMessageText`] = newLastMessage.text;
-                chatUpdates[`/userChats/${pId}/${chatId}/lastMessageTimestamp`] = newLastMessage.timestamp; // This needs to be resolved value for sorting
-                chatUpdates[`/userChats/${pId}/${chatId}/lastMessageSenderId`] = newLastMessage.senderId;
-            } else {
-                chatUpdates[`/userChats/${pId}/${chatId}/lastMessageText`] = "No messages yet.";
-                chatUpdates[`/userChats/${pId}/${chatId}/lastMessageTimestamp`] = chatMetadata.createdAt;
-                chatUpdates[`/userChats/${pId}/${chatId}/lastMessageSenderId`] = null;
+        if (newLastMessage) {
+          metadataUpdates[`/chats/${chatId}/lastMessageText`] = newLastMessage.text;
+          metadataUpdates[`/chats/${chatId}/lastMessageTimestamp`] = newLastMessage.timestamp;
+          metadataUpdates[`/chats/${chatId}/lastMessageSenderId`] = newLastMessage.senderId;
+        
+          chatMetadata.participants.forEach(pId => {
+            if (pId !== AI_ASSISTANT_ID) {
+                metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageText`] = newLastMessage!.text;
+                metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageTimestamp`] = newLastMessage!.timestamp; // Use actual timestamp
+                metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageSenderId`] = newLastMessage!.senderId;
+                metadataUpdates[`/userChats/${pId}/${chatId}/updatedAt`] = newLastMessage!.timestamp; // Use actual timestamp
             }
-            chatUpdates[`/userChats/${pId}/${chatId}/updatedAt`] = currentTime; // Use server timestamp for sorting
+          });
         }
+      } else {
+        // No messages left
+        metadataUpdates[`/chats/${chatId}/lastMessageText`] = "No messages yet.";
+        metadataUpdates[`/chats/${chatId}/lastMessageTimestamp`] = currentTime;
+        metadataUpdates[`/chats/${chatId}/lastMessageSenderId`] = null;
+
+        chatMetadata.participants.forEach(pId => {
+           if (pId !== AI_ASSISTANT_ID) {
+            metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageText`] = "No messages yet.";
+            metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageTimestamp`] = currentTime;
+            metadataUpdates[`/userChats/${pId}/${chatId}/lastMessageSenderId`] = null;
+            metadataUpdates[`/userChats/${pId}/${chatId}/updatedAt`] = currentTime;
+           }
+        });
       }
-      await update(ref(db), chatUpdates);
+      metadataUpdates[`/chats/${chatId}/updatedAt`] = currentTime;
+      await update(ref(db), metadataUpdates);
 
       toast({ title: "Messages Deleted", description: `${selectedMessages.length} message(s) deleted.` });
-      setSelectedMessages([]);
-    } catch (error) {
-      console.error("Error deleting messages:", error);
-      toast({ title: "Deletion Error", description: "Could not delete messages.", variant: "destructive" });
+    } catch (error: any) {
+      console.error("Error deleting messages or updating metadata:", error);
+      toast({ title: "Deletion Error", description: `Could not delete messages. Details: ${error.message}`, variant: "destructive" });
     } finally {
+      setSelectedMessages([]);
       setShowDeleteConfirm(false);
     }
   };
 
+  const otherParticipantName = otherParticipant?.displayName || otherParticipant?.username || "User";
+  const otherParticipantInitials = getInitials(otherParticipant?.displayName || otherParticipant?.username);
+  const otherParticipantPhoto = otherParticipant?.photoURL;
 
-  if (isLoading && !chatMetadata) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-var(--header-height,10rem))]">
-        <div className="text-center">
-          <svg className="animate-spin h-8 w-8 text-primary mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="text-muted-foreground">Loading chat...</p>
-        </div>
-      </div>
-    );
+  const pageTitle = chatMetadata?.isAiChat ? AI_ASSISTANT_NAME : (otherParticipantName || "Chat");
+
+  if (isLoading) {
+    return <div className="container mx-auto py-8 text-center">Loading chat...</div>;
+  }
+
+  if (!chatMetadata && !isLoading) {
+     // If still loading, the above return handles it. If not loading and no metadata, it's likely an error or redirect is pending.
+    return <div className="container mx-auto py-8 text-center">Preparing chat...</div>;
   }
   
-  const participantPhotoForHeader = chatMetadata?.isAiChat 
-      ? chatMetadata?.participantDetails[AI_ASSISTANT_ID]?.photoURL || AI_ASSISTANT_PHOTO_URL_FALLBACK 
-      : otherParticipant?.photoURL;
-
-  const participantNameForHeader = chatMetadata?.isAiChat 
-      ? AI_ASSISTANT_NAME 
-      : otherParticipant?.displayName || otherParticipant?.username || "User";
-
-
   return (
-    <div className="h-[calc(100vh-var(--header-height,5rem)-2rem)] md:h-[calc(100vh-var(--header-height,5rem)-4rem)] flex flex-col">
-      <Card className="shadow-lg flex-1 flex flex-col w-full max-w-5xl mx-auto">
-        <CardHeader className="border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-                <Button variant="ghost" size="icon" className="md:hidden" onClick={() => router.back()}>
-                <ArrowLeft className="h-5 w-5" />
-                </Button>
-                <Avatar className="h-10 w-10 border-2 border-primary/50">
-                    <AvatarImage src={participantPhotoForHeader || undefined} alt={participantNameForHeader || "avatar"} data-ai-hint="user avatar chat" />
-                    <AvatarFallback className="bg-primary text-primary-foreground">
-                    {chatMetadata?.isAiChat ? <Bot size={20}/> : getInitials(otherParticipant?.displayName || otherParticipant?.username)}
-                    </AvatarFallback>
-                </Avatar>
-                <div>
-                    <CardTitle className="text-xl font-headline text-primary">
-                    {participantNameForHeader}
-                    </CardTitle>
-                    {otherParticipant?.username && !chatMetadata?.isAiChat && (
-                        <Link href={`/profile/${otherParticipant.id}`} className="text-xs text-muted-foreground hover:underline">
-                            @{otherParticipant.username}
-                        </Link>
-                    )}
-                </div>
-            </div>
-          </div>
+    <div className="flex flex-col h-[calc(100vh-var(--header-height,4rem)-2rem)]"> {/* Adjust header height as needed */}
+      <Card className="flex-grow flex flex-col shadow-lg">
+        <CardHeader className="flex flex-row items-center space-x-4 p-3 border-b sticky top-0 bg-card z-10">
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => router.back()}>
+            <ArrowLeft />
+          </Button>
+          <Avatar className="h-10 w-10">
+            <AvatarImage src={otherParticipantPhoto || (chatMetadata?.isAiChat ? AI_ASSISTANT_PHOTO_URL_FALLBACK : undefined)} alt={otherParticipantName} data-ai-hint={chatMetadata?.isAiChat ? "bot avatar" : "user avatar"} />
+            <AvatarFallback className="bg-primary text-primary-foreground">
+                {chatMetadata?.isAiChat ? <Bot size={20}/> : otherParticipantInitials}
+            </AvatarFallback>
+          </Avatar>
+          <CardTitle className="text-xl font-headline text-primary">{pageTitle}</CardTitle>
         </CardHeader>
-        <CardContent className="flex-1 overflow-y-auto space-y-4 p-4">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex items-end space-x-2 group ${
-                msg.senderId === currentUser?.uid ? "justify-end" : "justify-start"
-              } ${msg.senderId === currentUser?.uid ? 'cursor-pointer' : ''} ${selectedMessages.includes(msg.id) ? 'bg-primary/10 rounded-lg py-1 -my-1' : ''} `}
-              onClick={() => msg.senderId === currentUser?.uid && handleMessageSelectToggle(msg.id, msg.senderId)}
-            >
-              {msg.senderId !== currentUser?.uid && (
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={msg.senderId === AI_ASSISTANT_ID ? (chatMetadata?.participantDetails[AI_ASSISTANT_ID]?.photoURL || AI_ASSISTANT_PHOTO_URL_FALLBACK) : otherParticipant?.photoURL || undefined} alt={msg.senderDisplayName || "Sender"} data-ai-hint="chat partner avatar" />
-                  <AvatarFallback className="bg-accent text-accent-foreground text-xs">
-                    {msg.senderId === AI_ASSISTANT_ID ? <Bot size={16}/> : getInitials(msg.senderDisplayName || (otherParticipant?.id === msg.senderId ? (otherParticipant?.displayName || otherParticipant?.username) : null))}
-                  </AvatarFallback>
-                </Avatar>
-              )}
+        
+        <CardContent className="flex-grow overflow-y-auto p-4 space-y-4">
+          {messages.map((msg) => {
+            const isCurrentUser = msg.senderId === currentUser?.uid;
+            const isSelected = selectedMessages.includes(msg.id);
+            const canSelect = isCurrentUser && !chatMetadata?.isAiChat && msg.senderId !== AI_ASSISTANT_ID;
+
+            return (
               <div
-                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-xl shadow ${
-                  msg.senderId === currentUser?.uid
-                    ? selectedMessages.includes(msg.id) ? "bg-primary/80 text-primary-foreground rounded-br-none" : "bg-primary text-primary-foreground rounded-br-none"
-                    : "bg-muted text-foreground rounded-bl-none"
-                }`}
+                key={msg.id}
+                className={`flex flex-col ${isCurrentUser ? "items-end" : "items-start"}`}
+                onClick={canSelect ? () => toggleMessageSelection(msg.id) : undefined}
               >
-                <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                <p className={`text-xs mt-1 ${msg.senderId === currentUser?.uid ? 'text-primary-foreground/70' : 'text-muted-foreground/70'}`}>
-                  {new Date(msg.timestamp as number).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
+                <div className={`flex items-end space-x-2 max-w-xs sm:max-w-md md:max-w-lg ${isCurrentUser ? "flex-row-reverse space-x-reverse" : ""}`}>
+                   {!isCurrentUser && (
+                    <Avatar className="h-8 w-8 self-start">
+                      <AvatarImage src={msg.senderPhotoURL || (msg.senderId === AI_ASSISTANT_ID ? AI_ASSISTANT_PHOTO_URL_FALLBACK : undefined)} alt={msg.senderDisplayName || "Sender"} data-ai-hint={msg.senderId === AI_ASSISTANT_ID ? "bot avatar" : "user avatar"}/>
+                      <AvatarFallback className="bg-muted text-muted-foreground text-xs">
+                        {msg.senderId === AI_ASSISTANT_ID ? <Bot size={16}/> : getInitials(msg.senderDisplayName)}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div
+                    className={`p-3 rounded-xl ${
+                      isCurrentUser
+                        ? "bg-primary text-primary-foreground rounded-br-none"
+                        : "bg-muted text-foreground rounded-bl-none"
+                    } ${canSelect ? 'cursor-pointer' : ''} ${isSelected ? (isCurrentUser ? 'bg-primary/70' : 'bg-muted/70 ring-2 ring-accent') : ''}`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                    <p className={`text-xs mt-1 ${isCurrentUser ? "text-primary-foreground/70" : "text-muted-foreground/70"} text-right`}>
+                      {new Date(msg.timestamp as number).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
               </div>
-              {msg.senderId === currentUser?.uid && customUserData && (
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={customUserData.photoURL || undefined} alt={customUserData.displayName || ""} data-ai-hint="my avatar" />
-                  <AvatarFallback className="bg-secondary text-secondary-foreground text-xs">
-                    {getInitials(customUserData.displayName)}
-                  </AvatarFallback>
-                </Avatar>
-              )}
-            </div>
-          ))}
-          {isSending && chatMetadata?.isAiChat && messages.at(-1)?.senderId === currentUser?.uid && (
-             <div className="flex items-end space-x-2 justify-start">
-               <Avatar className="h-8 w-8">
-                  <AvatarImage src={chatMetadata?.participantDetails[AI_ASSISTANT_ID]?.photoURL || AI_ASSISTANT_PHOTO_URL_FALLBACK} alt="AI Assistant" data-ai-hint="ai avatar" />
-                  <AvatarFallback className="bg-accent text-accent-foreground"><Bot size={16}/></AvatarFallback>
-               </Avatar>
-              <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-xl shadow bg-muted text-foreground rounded-bl-none">
-                <p className="text-sm">AI is typing...</p>
-              </div>
-            </div>
-          )}
+            );
+          })}
           <div ref={messagesEndRef} />
         </CardContent>
-        <div className="border-t p-4">
-          {selectedMessages.length > 0 ? (
-            <div className="flex items-center justify-between">
-              <Button variant="ghost" onClick={handleCancelSelection} className="text-muted-foreground">
-                <XCircle className="h-5 w-5 mr-2" />
-                Cancel ({selectedMessages.length})
-              </Button>
-              <Button variant="destructive" onClick={() => setShowDeleteConfirm(true)}>
-                <Trash2 className="h-5 w-5 mr-2" />
-                Delete
-              </Button>
-            </div>
-          ) : (
-            <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
-              <Input
-                type="text"
-                placeholder="Type your message..."
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                disabled={isSending || !chatMetadata}
-                className="flex-1"
-              />
-              <Button type="submit" disabled={isSending || !newMessage.trim() || !chatMetadata}>
-                <Send className="h-4 w-4 mr-0 sm:mr-2" />
-                <span className="hidden sm:inline">Send</span>
-              </Button>
-            </form>
-          )}
-        </div>
+
+        {selectedMessages.length > 0 ? (
+          <div className="p-3 border-t bg-card flex items-center justify-between sticky bottom-0">
+            <Button variant="ghost" onClick={() => setSelectedMessages([])} className="text-muted-foreground">
+                <XCircle className="mr-2 h-5 w-5" /> Cancel ({selectedMessages.length})
+            </Button>
+            <Button variant="destructive" onClick={() => setShowDeleteConfirm(true)}>
+                <Trash2 className="mr-2 h-5 w-5" /> Delete Selected
+            </Button>
+          </div>
+        ) : (
+          <form onSubmit={handleSendMessage} className="p-3 border-t bg-card flex items-center space-x-2 sticky bottom-0">
+            <Input
+              type="text"
+              placeholder="Type your message..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              className="flex-grow"
+              disabled={isSending || !chatMetadata}
+              autoComplete="off"
+            />
+            <Button type="submit" size="icon" disabled={isSending || !newMessage.trim() || !chatMetadata}>
+              <Send />
+            </Button>
+          </form>
+        )}
       </Card>
 
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
@@ -482,12 +455,12 @@ export default function ChatPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Messages?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete {selectedMessages.length} selected message(s)? This action cannot be undone.
+              Are you sure you want to delete {selectedMessages.length} message(s)? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteSelectedMessages} className="bg-destructive hover:bg-destructive/90">
+            <AlertDialogCancel onClick={() => setShowDeleteConfirm(false)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteSelectedMessages} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -496,6 +469,3 @@ export default function ChatPage() {
     </div>
   );
 }
-
-
-    
