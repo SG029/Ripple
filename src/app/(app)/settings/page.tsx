@@ -4,10 +4,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-// import { useTheme } from "next-themes"; // If you were to implement theme toggling
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useTheme } from "next-themes";
+import { Sun, Moon, Monitor } from "lucide-react";
 
 export default function SettingsPage() {
-  // const { theme, setTheme } = useTheme(); // Example for theme toggle
+  const { theme, setTheme } = useTheme();
 
   return (
     <div className="container mx-auto py-8 max-w-2xl">
@@ -17,19 +19,44 @@ export default function SettingsPage() {
           <CardDescription>Manage your application preferences.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-2">
+          <div className="space-y-4">
             <h3 className="text-xl font-semibold font-headline text-foreground">Appearance</h3>
-            {/* <div className="flex items-center justify-between p-4 border rounded-lg">
-              <Label htmlFor="theme-toggle" className="text-base">
-                Dark Mode
+            <RadioGroup
+              value={theme}
+              onValueChange={setTheme}
+              className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+            >
+              <Label
+                htmlFor="light-theme"
+                className={`flex flex-col items-center justify-center p-4 border rounded-lg cursor-pointer hover:border-primary transition-colors ${
+                  theme === "light" ? "border-primary ring-2 ring-primary bg-primary/10" : "border-border"
+                }`}
+              >
+                <RadioGroupItem value="light" id="light-theme" className="sr-only" />
+                <Sun className="h-6 w-6 mb-2 text-primary" />
+                <span className="font-medium text-foreground">Light</span>
               </Label>
-              <Switch
-                id="theme-toggle"
-                checked={theme === "dark"}
-                onCheckedChange={() => setTheme(theme === "dark" ? "light" : "dark")}
-              />
-            </div> */}
-            <p className="text-muted-foreground">Theme toggling can be added here using a library like `next-themes`.</p>
+              <Label
+                htmlFor="dark-theme"
+                className={`flex flex-col items-center justify-center p-4 border rounded-lg cursor-pointer hover:border-primary transition-colors ${
+                  theme === "dark" ? "border-primary ring-2 ring-primary bg-primary/10" : "border-border"
+                }`}
+              >
+                <RadioGroupItem value="dark" id="dark-theme" className="sr-only" />
+                <Moon className="h-6 w-6 mb-2 text-primary" />
+                <span className="font-medium text-foreground">Dark</span>
+              </Label>
+              <Label
+                htmlFor="system-theme"
+                className={`flex flex-col items-center justify-center p-4 border rounded-lg cursor-pointer hover:border-primary transition-colors ${
+                  theme === "system" ? "border-primary ring-2 ring-primary bg-primary/10" : "border-border"
+                }`}
+              >
+                <RadioGroupItem value="system" id="system-theme" className="sr-only" />
+                <Monitor className="h-6 w-6 mb-2 text-primary" />
+                <span className="font-medium text-foreground">System</span>
+              </Label>
+            </RadioGroup>
           </div>
 
           <div className="space-y-2">

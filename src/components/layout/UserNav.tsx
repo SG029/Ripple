@@ -12,12 +12,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, User as UserIcon, Settings, Sun, Moon } from "lucide-react"; // Assuming useTheme for dark mode later
+import { LogOut, User as UserIcon, Settings, Sun, Moon } from "lucide-react"; 
 import Link from "next/link";
+import { useTheme } from "next-themes";
 
 export function UserNav() {
   const { customUserData, signOut, currentUser } = useAuth();
-  // const { theme, setTheme } = useTheme(); // For theme toggle later
+  const { theme, setTheme } = useTheme();
 
   if (!currentUser) {
     return null; 
@@ -60,24 +61,24 @@ export function UserNav() {
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem asChild>
-            <Link href="/profile" className="cursor-pointer"> {/* Placeholder for profile page */}
+            <Link href="/profile" className="cursor-pointer">
               <UserIcon className="mr-2 h-4 w-4" />
               <span>Profile</span>
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-             <Link href="/settings" className="cursor-pointer"> {/* Placeholder for settings page */}
+             <Link href="/settings" className="cursor-pointer">
               <Settings className="mr-2 h-4 w-4" />
               <span>Settings</span>
             </Link>
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        {/* <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+        <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="cursor-pointer">
           {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
           <span>Toggle Theme</span>
         </DropdownMenuItem>
-        <DropdownMenuSeparator /> */}
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive-foreground focus:bg-destructive">
           <LogOut className="mr-2 h-4 w-4" />
           <span>Log out</span>
