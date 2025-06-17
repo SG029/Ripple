@@ -10,6 +10,7 @@ import {
   SidebarMenuButton,
   SidebarSeparator,
   SidebarHeader,
+  SidebarMenuSkeleton, // Added import
 } from "@/components/ui/sidebar";
 import { Bot, MessageSquare, Users, Settings, LogOut } from "lucide-react";
 import Link from "next/link";
@@ -143,14 +144,14 @@ export function AppSidebar() {
                   <Avatar className="h-6 w-6 mr-2 group-data-[collapsible=icon]:h-5 group-data-[collapsible=icon]:w-5 group-data-[collapsible=icon]:mr-0">
                     <AvatarImage src={chat.otherParticipantPhotoURL || undefined} alt={chat.otherParticipantDisplayName || ""} data-ai-hint="user avatar" />
                     <AvatarFallback className="text-xs bg-sidebar-accent text-sidebar-accent-foreground">
-                      {getInitials(chat.otherParticipantDisplayName)}
+                      {chat.isAiChat ? <Bot size={14}/> : getInitials(chat.otherParticipantDisplayName)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 overflow-hidden group-data-[collapsible=icon]:hidden">
                     <span className="text-sm font-medium truncate block">{chat.otherParticipantDisplayName || "Chat"}</span>
                     {chat.lastMessageText && (
                       <span className="text-xs text-sidebar-foreground/70 truncate block">
-                        {chat.lastMessageText}
+                        {chat.lastMessageSenderId === currentUser?.uid ? "You: " : ""}{chat.lastMessageText}
                       </span>
                     )}
                   </div>
